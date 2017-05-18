@@ -156,12 +156,9 @@ struct HttpSocket : uS::Berkeley<uS::Epoll>::Socket {
         }
         case PUBLISH: {
 
-            //std::cout << "Server got pub message!" << std::endl;
 
-//                        for (int i = 0; i < length; i++) {
-//                            std::cout << (int) (unsigned char) data[i] << " ";
-//                        }
-//                        std::cout << std::endl;
+            // todo: parse and dispatch based on topic (tree of topics)
+
 
             uint16_t topicLength = ntohs(*(uint16_t *) &data[2]);
 //            std::cout << "topicLength: " << topicLength << std::endl;
@@ -173,29 +170,6 @@ struct HttpSocket : uS::Berkeley<uS::Epoll>::Socket {
             //std::cout << "Publish - " << std::string(data + 4, topicLength) << " - " << std::string(data + 4 + topicLength, remainingLength - topicLength - 2) << std::endl;
 
             sharedMessage.append(data, length);
-
-            // assumes 10 pubs
-            static int pubs;
-            if (++pubs == 10) {
-
-                std::cout << "Broadcsting length: " << sharedMessage.length() << " over " << subscribers.size() << std::endl;
-
-                HttpSocket::Message message;
-                message.data = (char *) sharedMessage.data();
-                message.length = sharedMessage.length();
-                message.callback = nullptr;
-
-                for (uS::Berkeley<uS::Epoll>::Socket *s : subscribers) {
-                    //s->cork(true);
-                    s->sendMessage(&message, false);
-                    //s->cork(false);
-                }
-
-                // reset state
-                sharedMessage.clear();
-
-                pubs = 0;
-            }
 
             break;
         }
@@ -239,9 +213,10 @@ struct Passive {
             //switch (messageType)
 
             if (messageType == PUBLISH) {
-
-                static_cast<Node *>(socket->getContext())->publishHandler(static_cast<Connection *>(socket));
-
+                uint16_t topicLength = ntohs(*(uint16_t *) &cursor[2]);
+                static_cast<Node *>(socket->getContext())->publishHandler(static_cast<Connection *>(socket),
+                                                                          std::string_view(cursor + 4, topicLength),
+                                                                          std::string_view(cursor + 4 + topicLength, remainingLength - topicLength - 2));
             } else if (messageType == CONNACK) {
 
                 static_cast<Node *>(socket->getContext())->connAckHandler(static_cast<Connection *>(socket));
@@ -263,6 +238,26 @@ struct Passive {
 Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
     registerSocketDerivative<HttpSocket>(HTTP_SOCKET);
     registerSocketDerivative<Passive>(PASSIVE);
+
+    loop.postCb = [](void *) {
+        if (sharedMessage.length()) {
+            std::cout << "Broadcsting length: " << sharedMessage.length() << " over " << subscribers.size() << std::endl;
+
+            HttpSocket::Message message;
+            message.data = (char *) sharedMessage.data();
+            message.length = sharedMessage.length();
+            message.callback = nullptr;
+
+            for (uS::Berkeley<uS::Epoll>::Socket *s : subscribers) {
+                //s->cork(true);
+                s->sendMessage(&message, false);
+                //s->cork(false);
+            }
+
+            // reset state
+            sharedMessage.clear();
+        }
+    };
 }
 
 void Node::connect(std::string uri) {
@@ -303,12 +298,12 @@ void Node::onSubscribed(std::function<void(Connection *)> callback) {
     subAckHandler = callback;
 }
 
-void Node::onMessage(std::function<void(Connection *)> callback) {
+void Node::onMessage(std::function<void(Connection *, std::string_view topic, std::string_view message)> callback) {
     publishHandler = callback;
 }
 
 // private helper
-void Connection::connect(std::string name) {
+void Connection::connect(std::string_view name) {
 
     unsigned char *connect = new unsigned char[14 + name.length()];
 
@@ -353,7 +348,7 @@ void Connection::connect(std::string name) {
     sendMessage(&message, false);
 }
 
-void Connection::subscribe(std::string topic) {
+void Connection::subscribe(std::string_view topic) {
     unsigned char payloadLength = 2 + 2 + topic.length() + 1;
 
     unsigned char *subscribe = new unsigned char[2 + payloadLength];
@@ -377,8 +372,8 @@ void Connection::subscribe(std::string topic) {
     sendMessage(&message, false);
 }
 
-void Connection::publish(std::string topic) {
-    unsigned char payloadLength = 2 + topic.length() + 2;
+void Connection::publish(std::string_view topic, std::string_view data) {
+    unsigned char payloadLength = 2 + topic.length() + data.length();
 
     unsigned char *publish = new unsigned char[2 + payloadLength];
     publish[0] = 48;
@@ -389,8 +384,7 @@ void Connection::publish(std::string topic) {
 
     memcpy(publish + 4, topic.data(), topic.length());
 
-    uint16_t packetId = 1234;
-    memcpy(publish + 4 + topic.length(), &packetId, 2);
+    memcpy(publish + 4 + topic.length(), data.data(), data.length());
 
     HttpSocket::Message message;
     message.data = (char *) publish;
