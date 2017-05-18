@@ -10,6 +10,7 @@
 namespace uTT {
 
 class Passive;
+class Active;
 
 class Connection : private uS::Berkeley<uS::Epoll>::Socket {
 private:
@@ -22,6 +23,7 @@ public:
 
     friend class Node;
     friend class Passive;
+    friend class Active;
 };
 
 class Node : private uS::Berkeley<uS::Epoll>

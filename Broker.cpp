@@ -7,10 +7,14 @@
 #include <arpa/inet.h>
 #include <cstring>
 
+#include <map>
+#include <string>
+#include <set>
+
 namespace uTT {
 
 enum States {
-    HTTP_SOCKET,
+    ACTIVE,
     PASSIVE
 };
 
@@ -31,11 +35,77 @@ enum MQTT {
     DISCONNECT
 };
 
-std::vector<uS::Berkeley<uS::Epoll>::Socket *> subscribers;
+//class TopicTree {
 
-std::string sharedMessage;
+//};
 
-struct HttpSocket : uS::Berkeley<uS::Epoll>::Socket {
+struct TopicNode : std::map<std::string, TopicNode *> {
+    TopicNode *get(std::string path) {
+        std::pair<std::map<std::string, TopicNode *>::iterator, bool> p = insert({path, nullptr});
+        if (p.second) {
+            return p.first->second = new TopicNode;
+        } else {
+            return p.first->second;
+        }
+    }
+
+    std::vector<Connection *> subscribers;
+    std::string sharedMessage;
+};
+
+TopicNode *topicTree = new TopicNode;
+std::set<TopicNode *> pubNodes;
+
+std::vector<TopicNode *> getMatchingTopicNodes(std::string_view topic) {
+    std::vector<TopicNode *> matches;
+
+    TopicNode *curr = topicTree;
+
+    for (int i = 0; i < topic.length(); i++) {
+        int start = i;
+        while (topic[i] != '/' && i < topic.length()) {
+            i++;
+        }
+        std::string path(topic.substr(start, i - start));
+
+        // end wildcard consumes traversal
+        auto it = curr->find("#");
+        if (it != curr->end()) {
+            curr = it->second;
+            matches.push_back(curr);
+            break;
+        } else {
+            it = curr->find(path);
+            if (it == curr->end()) {
+                break;
+            } else {
+                curr = it->second;
+                if (i == topic.length()) {
+                    matches.push_back(curr);
+                    break;
+                }
+            }
+        }
+    }
+    return std::move(matches);
+}
+
+void subscribe(std::string topic, Connection *connection) {
+    TopicNode *curr = topicTree;
+
+    for (int i = 0; i < topic.length(); i++) {
+        int start = i;
+        while (topic[i] != '/' && i < topic.length()) {
+            i++;
+        }
+
+        curr = curr->get(topic.substr(start, i - start));
+    }
+
+    curr->subscribers.push_back(connection);
+}
+
+struct Active : uS::Berkeley<uS::Epoll>::Socket {
 
 
     static void parseMqtt(uS::Berkeley<uS::Epoll>::Socket *socket, char *data, size_t length) {
@@ -110,7 +180,7 @@ struct HttpSocket : uS::Berkeley<uS::Epoll>::Socket {
 
             unsigned char connAck[4] = {CONNACK << 4, 2, 0, 0};
 
-            HttpSocket::Message message;
+            Active::Message message;
             message.data = (char *) &connAck;
             message.length = 4;
             message.callback = nullptr;
@@ -122,62 +192,38 @@ struct HttpSocket : uS::Berkeley<uS::Epoll>::Socket {
         }
         case SUBSCRIBE: {
 
-
-            //unsigned char subscribe[] = {SUBSCRIBE << 4, payloadLength, packetId, packetId, topicLength, topicLength, 112, 114, 101, 115, 101, 110, 99, 101, qos};
-
-            //std::cout << "Subscribe: " << (int) remainingLength << std::endl;
-
-            // precense
-
-            //uint16_t packetId = *(uint16_t *) &data[2];
-            //std::cout << "PacketId: " << packetId << std::endl;
-
-
             uint16_t topicLength = ntohs(*(uint16_t *) &data[4]);
-            //std::cout << "topicLength: " << topicLength << std::endl;
-            //std::cout << "topic: " << std::string(data + 6, topicLength) << std::endl;
-            //std::cout << "Requested QoS: " << (int) data[6 + topicLength] << std::endl;
+            std::string topic(data + 6, topicLength);
 
-            //std::cout << clock() << " Subscribe - " << std::string(data + 6, topicLength) << std::endl;
-
-            //defaultRoom.addSubscriber(socket);
-
-            subscribers.push_back(socket);
+            subscribe(topic, static_cast<Connection *>(socket));
 
             // send suback
             unsigned char subAck[5] = {SUBACK << 4, 3, data[2], data[3], 0};
-            HttpSocket::Message message;
+            Active::Message message;
             message.data = (char *) &subAck;
             message.length = 5;
             message.callback = nullptr;
             socket->sendMessage(&message, false);
-
             break;
         }
         case PUBLISH: {
-
-
-            // todo: parse and dispatch based on topic (tree of topics)
-
-
+            // very basic tree here
             uint16_t topicLength = ntohs(*(uint16_t *) &data[2]);
-//            std::cout << "topicLength: " << topicLength << std::endl;
-//            std::cout << "topic: " << std::string(data + 4, topicLength) << std::endl;
+            std::string topic(data + 4, topicLength);
 
-//            uint16_t packetId = *(uint16_t *) &data[4 + topicLength];
-//            std::cout << "PacketId: " << packetId << std::endl;
-
-            //std::cout << "Publish - " << std::string(data + 4, topicLength) << " - " << std::string(data + 4 + topicLength, remainingLength - topicLength - 2) << std::endl;
-
-            sharedMessage.append(data, length);
-
+            for (TopicNode *topicNode : getMatchingTopicNodes(topic)) {
+                topicNode->sharedMessage.append(data, length);
+                if (topicNode->subscribers.size()) {
+                    pubNodes.insert(topicNode);
+                }
+            }
             break;
         }
         }
     }
 
-    HttpSocket(uS::Berkeley<uS::Epoll> *context) : uS::Berkeley<uS::Epoll>::Socket(context) {
-        setDerivative(HTTP_SOCKET);
+    Active(uS::Berkeley<uS::Epoll> *context) : uS::Berkeley<uS::Epoll>::Socket(context) {
+        setDerivative(ACTIVE);
     }
 
     static void onData(uS::Berkeley<uS::Epoll>::Socket *socket, char *data, size_t length) {
@@ -194,12 +240,12 @@ struct HttpSocket : uS::Berkeley<uS::Epoll>::Socket {
 
     static void onEnd(uS::Berkeley<uS::Epoll>::Socket *socket) {
         socket->close([](uS::Berkeley<uS::Epoll>::Socket *socket) {
-            delete (HttpSocket *) socket;
+            delete (Active *) socket;
         });
     }
 
     static uS::Berkeley<uS::Epoll>::Socket *allocator(uS::Berkeley<uS::Epoll> *context) {
-        return new HttpSocket(context);
+        return new Active(context);
     }
 };
 
@@ -236,26 +282,33 @@ struct Passive {
 };
 
 Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
-    registerSocketDerivative<HttpSocket>(HTTP_SOCKET);
+    registerSocketDerivative<Active>(ACTIVE);
     registerSocketDerivative<Passive>(PASSIVE);
 
     loop.postCb = [](void *) {
-        if (sharedMessage.length()) {
-            std::cout << "Broadcsting length: " << sharedMessage.length() << " over " << subscribers.size() << std::endl;
+        // if tree has new publishes
+        if (pubNodes.size()) {
 
-            HttpSocket::Message message;
-            message.data = (char *) sharedMessage.data();
-            message.length = sharedMessage.length();
-            message.callback = nullptr;
+            for (TopicNode *topicNode : pubNodes) {
 
-            for (uS::Berkeley<uS::Epoll>::Socket *s : subscribers) {
-                //s->cork(true);
-                s->sendMessage(&message, false);
-                //s->cork(false);
+                std::cout << "Broadcsting length: " << topicNode->sharedMessage.length() << " over " << topicNode->subscribers.size() << std::endl;
+
+                Active::Message message;
+                message.data = (char *) topicNode->sharedMessage.data();
+                message.length = topicNode->sharedMessage.length();
+                message.callback = nullptr;
+
+                for (uS::Berkeley<uS::Epoll>::Socket *s : topicNode->subscribers) {
+                    //s->cork(true);
+                    s->sendMessage(&message, false);
+                    //s->cork(false);
+                }
+
+                topicNode->sharedMessage.clear();
             }
 
             // reset state
-            sharedMessage.clear();
+            pubNodes.clear();
         }
     };
 }
@@ -273,7 +326,7 @@ void Node::connect(std::string uri) {
             }
             static_cast<Connection *>(socket)->connect(randomId);
         }
-    }, HttpSocket::allocator);
+    }, Active::allocator);
 }
 
 void Node::listen() {
@@ -281,7 +334,7 @@ void Node::listen() {
 
                  socket->setNoDelay(true);
 
-    }, HttpSocket::allocator)) {
+    }, Active::allocator)) {
         std::cout << "Listening to port 1883" << std::endl;
     }
 }
@@ -341,7 +394,7 @@ void Connection::connect(std::string_view name) {
 //    }
 //    std::terminate();
 
-    HttpSocket::Message message;
+    Active::Message message;
     message.data = (char *) connect;
     message.length = 14 + name.length();
     message.callback = nullptr;
@@ -365,7 +418,7 @@ void Connection::subscribe(std::string_view topic) {
 
     subscribe[payloadLength + 1] = 0; // qos
 
-    HttpSocket::Message message;
+    Active::Message message;
     message.data = (char *) subscribe;
     message.length = payloadLength + 2;
     message.callback = nullptr;
@@ -386,7 +439,7 @@ void Connection::publish(std::string_view topic, std::string_view data) {
 
     memcpy(publish + 4 + topic.length(), data.data(), data.length());
 
-    HttpSocket::Message message;
+    Active::Message message;
     message.data = (char *) publish;
     message.length = payloadLength + 2;
     message.callback = nullptr;
