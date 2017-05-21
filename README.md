@@ -1,23 +1,35 @@
-## µTT (motivation post so far, prototype exists)
-µTT ("microTT") is a free and open source MQTT broker designed to [raise the bar](https://github.com/alexhultman/MQTT-broker-benchmarks) when it comes to simple pub/sub needs. In contrast to many other brokers it focuses on one thing and one thing only - the open and lightweight MQTT standard. This allows for an instant adoption where the current MQTT client support can be leveraged to connect existing IoT devices with no change of code.
+<div align="center"><img src="µTT.png"/></div>
 
-#### The "we need a new standard" meme
-The popular [xkcd meme](https://xkcd.com/927/) cannot be any more relevant here. We already have a billion different brokers out there, each with its own custom protocol all aiming to achieve the same general goal. Open standards invite a healthy dose of evolution while custom protocols only aim to lock users to a specific vendor and complicate benchmarking. Why add a new protocol only to ruin it with bloated and inefficient JSON/text fundamentals with O(n) parsing when we have lightweight and binary O(1) protocols already standardized?
+µTT ("microTT") is a lightweight and efficient MQTT broker designed to raise the bar for pub/sub performance. It significantly outperforms emqtt, Redis, HiveMQ, Mosquitto, RabbitMQ, Mosca and many others. Memory usage per connection is also significantly lower as it builds on the networking foundation developed for µWebSockets.
 
-#### Vendor-neutral, minimal & efficient pub/sub
-MQTT has clients in all major languages and they provide easy to use pub/sub just like any other solution would. Below is a simple Node.js example using MQTT.js:
+Read more about MQTT [here](http://mqtt.org/), find client libraries [here](http://www.hivemq.com/mqtt-client-library-encyclopedia).
+
+### Vendor-neutral, minimal & efficient pub/sub
+Below is a simple Node.js example using MQTT.js:
 ```javascript
-var mqtt = require('mqtt')
-var client  = mqtt.connect('mqtt://test.mosquitto.org')
+var mqtt = require('mqtt');
+
+// connect to the broker
+var client = mqtt.connect('mqtt://localhost');
 
 client.on('connect', function () {
-  client.subscribe('presence')
-  client.publish('presence', 'Hello mqtt')
-})
+  // subscribe to all temperature sensors
+  client.subscribe('sensors/+/temperature');
+  
+  // publish some temperature numbers
+  client.publish('sensors/house/temperature', '21');
+  client.publish('sensors/sauna/temperature', '107');
+});
 
 client.on('message', function (topic, message) {
-  // message is Buffer
-  console.log(message.toString())
-  client.end()
-})
+  // receive our numbers
+  console.log(topic + ': ' + message.toString() + ' Celcius');
+});
 ```
+
+### Benchmarks
+A simple broadcasting benchmark has been developed to determine roughly the publishing performance of a few brokers under varying burst load, as charted below:
+
+<div align="center"><img src="averaged.png"/></div>
+
+* HiveMQ is proprietary and limited to 25 connections in demo mode.
