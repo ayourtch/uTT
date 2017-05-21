@@ -39,6 +39,8 @@ public:
     void connect(std::string uri);
     void listen();
     void run();
+    void close();
+
     // these are all client-only
     void onConnected(std::function<void(Connection *)> callback);
     void onSubscribed(std::function<void(Connection *)> callback);

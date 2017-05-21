@@ -291,7 +291,7 @@ Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
 
             for (TopicNode *topicNode : pubNodes) {
 
-                std::cout << "Broadcsting length: " << topicNode->sharedMessage.length() << " over " << topicNode->subscribers.size() << std::endl;
+                //std::cout << "Broadcsting length: " << topicNode->sharedMessage.length() << " over " << topicNode->subscribers.size() << std::endl;
 
                 Active::Message message;
                 message.data = (char *) topicNode->sharedMessage.data();
@@ -314,7 +314,7 @@ Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
 }
 
 void Node::connect(std::string uri) {
-    uS::Berkeley<uS::Epoll>::connect("localhost", 1883, [](uS::Berkeley<uS::Epoll>::Socket *socket) {
+    uS::Berkeley<uS::Epoll>::connect("127.0.0.1", 1883, [](uS::Berkeley<uS::Epoll>::Socket *socket) {
         if (!socket) {
             std::cout << "Connection failed" << std::endl;
         } else {
@@ -336,11 +336,19 @@ void Node::listen() {
 
     }, Active::allocator)) {
         std::cout << "Listening to port 1883" << std::endl;
+    } else {
+        std::terminate();
     }
 }
 
 void Node::run() {
     loop.run();
+}
+
+void Node::close() {
+    this->stopListening();
+
+    topicTree = new TopicNode;
 }
 
 void Node::onConnected(std::function<void(Connection *)> callback) {
@@ -423,6 +431,12 @@ void Connection::subscribe(std::string_view topic) {
     message.length = payloadLength + 2;
     message.callback = nullptr;
     sendMessage(&message, false);
+}
+
+void Connection::close() {
+    uS::Berkeley<uS::Epoll>::Socket::close([](uS::Berkeley<uS::Epoll>::Socket *socket) {
+        delete static_cast<Connection *>(socket);
+    });
 }
 
 void Connection::publish(std::string_view topic, std::string_view data) {
