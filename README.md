@@ -32,4 +32,9 @@ A simple broadcasting benchmark has been developed to determine roughly the publ
 
 <div align="center"><img src="averaged.png"/></div>
 
-* HiveMQ is proprietary and limited to 25 connections in demo mode.
+* HiveMQ is proprietary and limited to 25 connections in demo mode. I was to receive a full test version but was later denied this when they realized I was posting benchmark results.
+* HiveMQ is projected to possibly outperform emqtt at larger problem sizes but this cannot be validated.
+
+<div align="center"><img src="redis.png"/></div>
+
+* Redis performs very good at small problem sizes but starts to fall behind at medium to large sizes.
