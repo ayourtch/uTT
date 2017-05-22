@@ -11,6 +11,8 @@
 #include <string>
 #include <set>
 
+int REDIS = false;
+
 namespace uTT {
 
 enum States {
@@ -50,7 +52,7 @@ struct TopicNode : std::map<std::string, TopicNode *> {
         }
     }
 
-    std::vector<Connection *> subscribers;
+    std::vector<std::pair<Connection *, bool *>> subscribers;
     std::string sharedMessage;
 };
 
@@ -103,7 +105,7 @@ void subscribe(std::string topic, Connection *connection) {
         curr = curr->get(topic.substr(start, i - start));
     }
 
-    curr->subscribers.push_back(connection);
+    curr->subscribers.push_back({connection, (bool *) connection->getUserData()});
 }
 
 struct Active : uS::Berkeley<uS::Epoll>::Socket {
@@ -225,6 +227,9 @@ struct Active : uS::Berkeley<uS::Epoll>::Socket {
 
     Active(uS::Berkeley<uS::Epoll> *context) : uS::Berkeley<uS::Epoll>::Socket(context) {
         setDerivative(ACTIVE);
+
+        bool *valid = new bool(true);
+        setUserData(valid);
     }
 
     static void onData(uS::Berkeley<uS::Epoll>::Socket *socket, char *data, size_t length) {
@@ -240,6 +245,8 @@ struct Active : uS::Berkeley<uS::Epoll>::Socket {
     }
 
     static void onEnd(uS::Berkeley<uS::Epoll>::Socket *socket) {
+        bool *valid = (bool *) socket->getUserData();
+        *valid = false;
         socket->close([](uS::Berkeley<uS::Epoll>::Socket *socket) {
             delete (Active *) socket;
         });
@@ -327,10 +334,13 @@ Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
                 message.length = topicNode->sharedMessage.length();
                 message.callback = nullptr;
 
-                for (uS::Berkeley<uS::Epoll>::Socket *s : topicNode->subscribers) {
-                    //s->cork(true);
-                    s->sendMessage(&message, false);
-                    //s->cork(false);
+                for (auto it = topicNode->subscribers.begin(); it != topicNode->subscribers.end(); ) {
+                    if (!*it->second) {
+                        it = topicNode->subscribers.erase(it);
+                    } else {
+                        it->first->sendMessage(&message, false);
+                        it++;
+                    }
                 }
 
                 topicNode->sharedMessage.clear();

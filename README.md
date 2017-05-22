@@ -27,14 +27,20 @@ client.on('message', function (topic, message) {
 });
 ```
 
+### Compilation
+The broker and matching benchmark can be compiled with a C++17 compiler using make on Linux:
+
+`make`
+
+Both broker and benchmark are in a *very* experimental and broken state currently. This is all highly unstable and incomplete right now.
+
 ### Benchmarks
-A simple broadcasting benchmark has been developed to determine roughly the publishing performance of a few brokers under varying burst load, as charted below:
+A simple & automatic broadcasting benchmark has been developed to determine roughly the publishing performance of a few brokers under varying burst load. It supports both MQTT and Redis protocols to allow comparison with Redis (which has shown to be a good reference at small broadcasts).
 
 <div align="center"><img src="averaged.png"/></div>
 
 * HiveMQ is proprietary and limited to 25 connections in demo mode. I was to receive a full test version but was later denied this when they realized I was posting benchmark results.
-* HiveMQ is projected to possibly outperform emqtt at larger problem sizes but this cannot be validated.
 
 <div align="center"><img src="redis.png"/></div>
 
-* Redis performs very good at small problem sizes but starts to fall behind at medium to large sizes.
+* Results in text form can be found in the `benchmark_results` file.

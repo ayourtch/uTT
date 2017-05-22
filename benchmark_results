@@ -1,0 +1,88 @@
+Broker name is: emqtt (running as MQTT client)
+Running benchmark of 25 subscribers, 1 publishers
+	Average delay at sample 100: 0.30921ms
+
+Running benchmark of 25 subscribers, 10 publishers
+	Average delay at sample 100: 1.81138ms
+
+Running benchmark of 25 subscribers, 25 publishers
+	Average delay at sample 100: 3.94251ms
+
+Running benchmark of 50 subscribers, 25 publishers
+	Average delay at sample 100: 7.1913ms
+
+Running benchmark of 100 subscribers, 25 publishers
+	Average delay at sample 100: 13.7948ms
+
+Running benchmark of 500 subscribers, 25 publishers
+	Average delay at sample 100: 71.0853ms
+
+Running benchmark of 500 subscribers, 100 publishers
+	Average delay at sample 100: 266.533ms
+
+Broker name is: redis (running as Redis client)
+Running benchmark of 25 subscribers, 1 publishers
+	Average delay at sample 100: 0.11013ms
+
+Running benchmark of 25 subscribers, 10 publishers
+	Average delay at sample 100: 0.30268ms
+
+Running benchmark of 25 subscribers, 25 publishers
+	Average delay at sample 100: 0.41989ms
+
+Running benchmark of 50 subscribers, 25 publishers
+	Average delay at sample 100: 0.69815ms
+
+Running benchmark of 100 subscribers, 25 publishers
+	Average delay at sample 100: 1.24349ms
+
+Running benchmark of 500 subscribers, 25 publishers
+	Average delay at sample 100: 6.74976ms
+
+Running benchmark of 500 subscribers, 100 publishers
+	Average delay at sample 100: 10.6611ms
+
+Broker name is: µtt (running as MQTT client)
+Running benchmark of 25 subscribers, 1 publishers
+	Average delay at sample 100: 0.09372ms
+
+Running benchmark of 25 subscribers, 10 publishers
+	Average delay at sample 100: 0.16676ms
+
+Running benchmark of 25 subscribers, 25 publishers
+	Average delay at sample 100: 0.24302ms
+
+Running benchmark of 50 subscribers, 25 publishers
+	Average delay at sample 100: 0.46946ms
+
+Running benchmark of 100 subscribers, 25 publishers
+	Average delay at sample 100: 0.90168ms
+
+Running benchmark of 500 subscribers, 25 publishers
+	Average delay at sample 100: 4.75793ms
+
+Running benchmark of 500 subscribers, 100 publishers
+	Average delay at sample 100: 4.92682ms
+
+Broker name is: mosca (running as MQTT client)
+Running benchmark of 25 subscribers, 1 publishers
+	Average delay at sample 100: 0.99244ms
+
+Running benchmark of 25 subscribers, 10 publishers
+	Average delay at sample 100: 5.19998ms
+
+Running benchmark of 25 subscribers, 25 publishers
+	Average delay at sample 100: 10.7936ms
+
+Running benchmark of 50 subscribers, 25 publishers
+	Average delay at sample 100: 19.2041ms
+
+Running benchmark of 100 subscribers, 25 publishers
+	Average delay at sample 100: 35.2202ms
+
+Running benchmark of 500 subscribers, 25 publishers
+	Average delay at sample 100: 191.527ms
+
+Running benchmark of 500 subscribers, 100 publishers
+	Average delay at sample 100: 759.832ms
+

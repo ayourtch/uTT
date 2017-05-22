@@ -1,7 +1,7 @@
 #ifndef BROKER_H
 #define BROKER_H
 
-static const int REDIS = true;
+extern int REDIS;
 
 #include "uSockets/Berkeley.h"
 #include "uSockets/Epoll.h"
@@ -20,6 +20,7 @@ private:
     void connect(std::string_view name);
 
 public:
+    using uS::Berkeley<uS::Epoll>::Socket::getUserData;
     void subscribe(std::string_view topic);
     void publish(std::string_view topic, std::string_view message);
     void close();
