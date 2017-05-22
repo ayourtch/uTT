@@ -1,6 +1,8 @@
 #ifndef BROKER_H
 #define BROKER_H
 
+static const int REDIS = true;
+
 #include "uSockets/Berkeley.h"
 #include "uSockets/Epoll.h"
 
@@ -11,6 +13,7 @@ namespace uTT {
 
 class Passive;
 class Active;
+class Redis;
 
 class Connection : private uS::Berkeley<uS::Epoll>::Socket {
 private:
@@ -22,6 +25,7 @@ public:
     void close();
 
     friend class Node;
+    friend class Redis;
     friend class Passive;
     friend class Active;
 };
@@ -47,6 +51,7 @@ public:
     void onMessage(std::function<void(Connection *, std::string_view topic, std::string_view message)> callback);
 
     friend class Connection;
+    friend class Redis;
     friend class Passive;
 };
 

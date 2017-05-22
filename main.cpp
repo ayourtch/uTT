@@ -3,7 +3,7 @@
 
 void testBroadcastingPerformance(int subscribers, int publishers, bool native) {
     uTT::Node broker;
-    std::vector<uTT::Connection *> clients;
+    std::vector<uTT::Connection *> clients, pubs;
     std::chrono::high_resolution_clock::time_point startPoint;
 
     int lapse = 0;
@@ -12,16 +12,36 @@ void testBroadcastingPerformance(int subscribers, int publishers, bool native) {
 
     std::cout << "Running benchmark of " << subscribers << " subscribers, " << publishers << " publishers" << std::endl;
 
-    broker.onConnected([](uTT::Connection *connection) {
-        connection->subscribe("hallå/#");
+    broker.onConnected([&](uTT::Connection *connection) {
+
+        if (clients.size() == subscribers) {
+            pubs.push_back(connection);
+            if (pubs.size() == publishers) {
+                startPoint = std::chrono::high_resolution_clock::now();
+                for (int i = 0; i < publishers; i++) {
+                    pubs[i]->publish("hallå/some topic", "hallåja");
+                }
+            } else {
+                broker.connect("localhost");
+            }
+
+        } else {
+            connection->subscribe("hallå/#");
+        }
     });
 
     broker.onSubscribed([&](uTT::Connection *connection) {
         clients.push_back(connection);
         if (clients.size() == subscribers) {
-            startPoint = std::chrono::high_resolution_clock::now();
-            for (int i = 0; i < publishers; i++) {
-                clients[i]->publish("hallå/some topic", "hallåja");
+
+            if (REDIS) {
+                // now connect the separate publishers
+                broker.connect("localhost");
+            } else {
+                startPoint = std::chrono::high_resolution_clock::now();
+                for (int i = 0; i < publishers; i++) {
+                    clients[i]->publish("hallå/some topic", "hallåja");
+                }
             }
         } else {
             broker.connect("localhost");
@@ -40,13 +60,28 @@ void testBroadcastingPerformance(int subscribers, int publishers, bool native) {
             }
             received = 0;
             if (totalSamples / 100 < 10) {
-                startPoint = std::chrono::high_resolution_clock::now();
-                for (int i = 0; i < publishers; i++) {
-                    clients[i]->publish("hallå/some topic", "hallåja");
+
+                if (REDIS) {
+                    startPoint = std::chrono::high_resolution_clock::now();
+                    for (int i = 0; i < publishers; i++) {
+                        pubs[i]->publish("hallå/some topic", "hallåja");
+                    }
+                } else {
+                    startPoint = std::chrono::high_resolution_clock::now();
+                    for (int i = 0; i < publishers; i++) {
+                        clients[i]->publish("hallå/some topic", "hallåja");
+                    }
                 }
+
+
+
+
             } else {
                 std::cout << std::endl;
                 for (auto *client : clients) {
+                    client->close();
+                }
+                for (auto *client : pubs) {
                     client->close();
                 }
                 broker.close();
@@ -91,9 +126,9 @@ int main() {
     srand(time(0));
 
     while (true) {
-        std::cout << "Enter broker name: ";
-        std::string brokerName;
-        std::cin >> brokerName;
+        //std::cout << "Enter broker name: ";
+        std::string brokerName = "redis";
+        //std::cin >> brokerName;
         bool native = brokerName == "µtt";
         testBroadcastingPerformance(25, 1, native);
         testBroadcastingPerformance(25, 10, native);
@@ -101,7 +136,11 @@ int main() {
 
         testBroadcastingPerformance(50, 25, native);
         testBroadcastingPerformance(100, 25, native);
+
+        //these only make sense for mosquitto, redis and µtt
         testBroadcastingPerformance(500, 25, native);
+        testBroadcastingPerformance(500, 100, native);
+        break;
     }
 
     //testTopicTree();
