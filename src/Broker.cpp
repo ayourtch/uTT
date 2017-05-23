@@ -69,7 +69,7 @@ std::vector<TopicNode *> getMatchingTopicNodes(std::string_view topic) {
         while (topic[i] != '/' && i < topic.length()) {
             i++;
         }
-        std::string path(topic.substr(start, i - start));
+        std::string path(topic.data() + start, i - start);
 
         // end wildcard consumes traversal
         auto it = curr->find("#");
@@ -80,8 +80,13 @@ std::vector<TopicNode *> getMatchingTopicNodes(std::string_view topic) {
         } else {
             it = curr->find(path);
             if (it == curr->end()) {
+                it = curr->find("+");
+                if (it != curr->end()) {
+                    goto skip;
+                }
                 break;
             } else {
+                skip:
                 curr = it->second;
                 if (i == topic.length()) {
                     matches.push_back(curr);

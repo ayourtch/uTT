@@ -9,12 +9,16 @@ void testTopicTree() {
         connection->subscribe("fruit/apple");
         connection->subscribe("fruit/orange/yolo");
         connection->subscribe("fruit/#");
+        connection->subscribe("sensors/+/temperature");
     });
 
     broker.onSubscribed([&subs](uTT::Connection *connection) {
-        if (++subs == 3) {
+        if (++subs == 4) {
             connection->publish("fruit/appleä", "hallåja");
             connection->publish("fruit/orange/r", "HALLÅÅÅÅJA");
+            connection->publish("sensors/house/temperature", "21");
+            connection->publish("sensors/house/temp", "21");
+            connection->publish("sensors/sauna/temperature", "107");
         }
     });
 
