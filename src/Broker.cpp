@@ -1,17 +1,16 @@
 #include "Broker.h"
+#include "TopicTree.h"
+#include "MQTT.h"
 
 #include <iostream>
 #include <vector>
 #include <map>
-
-#include <arpa/inet.h>
-#include <cstring>
-
-#include <map>
 #include <string>
 #include <set>
 
+// static
 int REDIS = false;
+TopicTree topicTree;
 
 namespace uTT {
 
@@ -20,98 +19,6 @@ enum States {
     PASSIVE,
     REDIS_STATE
 };
-
-enum MQTT {
-    CONNECT = 1,
-    CONNACK,
-    PUBLISH,
-    PUBACK,
-    PUBREC,
-    PUBREL,
-    PUBCOMP,
-    SUBSCRIBE,
-    SUBACK,
-    UNSUBSCRIBE,
-    UNSUBACK,
-    PINGREQ,
-    PINGRESP,
-    DISCONNECT
-};
-
-//class TopicTree {
-
-//};
-
-struct TopicNode : std::map<std::string, TopicNode *> {
-    TopicNode *get(std::string path) {
-        std::pair<std::map<std::string, TopicNode *>::iterator, bool> p = insert({path, nullptr});
-        if (p.second) {
-            return p.first->second = new TopicNode;
-        } else {
-            return p.first->second;
-        }
-    }
-
-    std::vector<std::pair<Connection *, bool *>> subscribers;
-    std::string sharedMessage;
-};
-
-TopicNode *topicTree = new TopicNode;
-std::set<TopicNode *> pubNodes;
-
-std::vector<TopicNode *> getMatchingTopicNodes(std::string_view topic) {
-    std::vector<TopicNode *> matches;
-
-    TopicNode *curr = topicTree;
-
-    for (int i = 0; i < topic.length(); i++) {
-        int start = i;
-        while (topic[i] != '/' && i < topic.length()) {
-            i++;
-        }
-        std::string path(topic.data() + start, i - start);
-
-        // end wildcard consumes traversal
-        auto it = curr->find("#");
-        if (it != curr->end()) {
-            curr = it->second;
-            matches.push_back(curr);
-            break;
-        } else {
-            it = curr->find(path);
-            if (it == curr->end()) {
-                it = curr->find("+");
-                if (it != curr->end()) {
-                    goto skip;
-                }
-                break;
-            } else {
-                skip:
-                curr = it->second;
-                if (i == topic.length()) {
-                    matches.push_back(curr);
-                    break;
-                }
-            }
-        }
-    }
-    return std::move(matches);
-}
-
-void subscribe(std::string topic, Connection *connection) {
-    TopicNode *curr = topicTree;
-
-    for (int i = 0; i < topic.length(); i++) {
-        int start = i;
-        while (topic[i] != '/' && i < topic.length()) {
-            i++;
-        }
-
-        curr = curr->get(topic.substr(start, i - start));
-    }
-
-    curr->subscribers.push_back({connection, (bool *) connection->getUserData()});
-}
 
 struct Active : uS::Berkeley<uS::Epoll>::Socket {
 
@@ -203,7 +110,7 @@ struct Active : uS::Berkeley<uS::Epoll>::Socket {
             uint16_t topicLength = ntohs(*(uint16_t *) &data[4]);
             std::string topic(data + 6, topicLength);
 
-            subscribe(topic, static_cast<Connection *>(socket));
+            topicTree.subscribe(topic, static_cast<Connection *>(socket), (bool *) static_cast<Connection *>(socket)->getUserData());
 
             // send suback
             unsigned char subAck[5] = {SUBACK << 4, 3, data[2], data[3], 0};
@@ -219,12 +126,7 @@ struct Active : uS::Berkeley<uS::Epoll>::Socket {
             uint16_t topicLength = ntohs(*(uint16_t *) &data[2]);
             std::string topic(data + 4, topicLength);
 
-            for (TopicNode *topicNode : getMatchingTopicNodes(topic)) {
-                topicNode->sharedMessage.append(data, length);
-                if (topicNode->subscribers.size()) {
-                    pubNodes.insert(topicNode);
-                }
-            }
+            topicTree.publish(topic, data, length);
             break;
         }
         }
@@ -327,33 +229,15 @@ Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
     registerSocketDerivative<Redis>(REDIS_STATE);
 
     loop.postCb = [](void *) {
-        // if tree has new publishes
-        if (pubNodes.size()) {
-
-            for (TopicNode *topicNode : pubNodes) {
-
-                //std::cout << "Broadcsting length: " << topicNode->sharedMessage.length() << " over " << topicNode->subscribers.size() << std::endl;
-
-                Active::Message message;
-                message.data = (char *) topicNode->sharedMessage.data();
-                message.length = topicNode->sharedMessage.length();
-                message.callback = nullptr;
-
-                for (auto it = topicNode->subscribers.begin(); it != topicNode->subscribers.end(); ) {
-                    if (!*it->second) {
-                        it = topicNode->subscribers.erase(it);
-                    } else {
-                        it->first->sendMessage(&message, false);
-                        it++;
-                    }
-                }
-
-                topicNode->sharedMessage.clear();
-            }
-
-            // reset state
-            pubNodes.clear();
-        }
+        Active::Message message;
+        topicTree.drain([](void *user, char *data, size_t length) {
+            Active::Message *messagePtr = (Active::Message *) user;
+            messagePtr->data = data;
+            messagePtr->length = length;
+            messagePtr->callback = nullptr;
+        }, [](void *user, void *connection) {
+            static_cast<Connection *>(connection)->sendMessage(static_cast<Active::Message *>(user), false);
+        }, &message);
     };
 }
 
@@ -380,9 +264,7 @@ void Node::connect(std::string uri) {
 
 void Node::listen() {
     if (uS::Berkeley<uS::Epoll>::listen(nullptr, 1883, 0, [](uS::Berkeley<uS::Epoll>::Socket *socket) {
-
-                 socket->setNoDelay(true);
-
+        socket->setNoDelay(true);
     }, Active::allocator)) {
         std::cout << "Listening to port 1883" << std::endl;
     } else {
@@ -397,7 +279,8 @@ void Node::run() {
 void Node::close() {
     this->stopListening();
 
-    topicTree = new TopicNode;
+    // is this really needed? drain?
+    topicTree.reset();
 }
 
 void Node::onConnected(std::function<void(Connection *)> callback) {
@@ -412,56 +295,37 @@ void Node::onMessage(std::function<void(Connection *, std::string_view topic, st
     publishHandler = callback;
 }
 
+void Connection::close() {
+    uS::Berkeley<uS::Epoll>::Socket::close([](uS::Berkeley<uS::Epoll>::Socket *socket) {
+        delete static_cast<Connection *>(socket);
+    });
+}
+
 // private helper
 void Connection::connect(std::string_view name) {
-
-    unsigned char *connect = new unsigned char[14 + name.length()];
-
-    connect[0] = 16;
-    connect[1] = 12 + name.length(); // payload length
-    connect[2] = 0; //version
-    connect[3] = 4; // version
-    connect[4] = 'M';
-    connect[5] = 'Q';
-    connect[6] = 'T';
-    connect[7] = 'T';
-
-    connect[8] = 4;
-    connect[9] = 2;
-    connect[10] = 0;
-    connect[11] = 60;
-
-    uint16_t nameLength = htons(name.length());
-    memcpy(connect + 12, &nameLength, 2);
-
-    memcpy(connect + 14, name.data(), name.length());
-
-    //            16 27 0 4 77 81 84 84 4 2 0 60 0 15 109 113 116 116 106 115 95 102 53 49 52 55 49 99 56
-    //            16 27 0 4 77 81 84 84 4 2 0 60 0 15 109 113 116 116 106 115 95 97 51 102 49 57 102 56 50
-    //            16 27 0 4 77 81 84 84 4 2 0 60 0 15 109 113 116 116 106 115 95 102 52 54 101 99 100 98 48
-    //            16 27 0 4 77 81 84 84 4 2 0 60 0 15 109 113 116 116 106 115 95 53 49 48 49 49 97 102 53
-
-//    std::cout << (12 + name.length()) << std::endl;
-
-//    unsigned char control[] = {16, 27, 0, 4, 77, 81, 84, 84, 4, 2, 0, 60, 0, 15, 109, 113, 116, 116, 106, 115, 95,
-//                                  'A' + rand() % 27, 'A' + rand() % 27, 'A' + rand() % 27, 'A' + rand() % 27, 'A' + rand() % 27, 'A' + rand() % 27, 'A' + rand() % 27, 'A' + rand() % 27};
-
-//    for (int i = 0; i < 29; i++) {
-//        std::cout << (int) control[i] << " == " << (int) connect[i] << std::endl;
-//    }
-//    std::terminate();
+    size_t length = getConnectLength(name);
+    unsigned char *connect = new unsigned char[length];
+    formatConnect(connect, name);
 
     Active::Message message;
     message.data = (char *) connect;
-    message.length = 14 + name.length();
+    message.length = length;
     message.callback = nullptr;
     sendMessage(&message, false);
 }
 
 void Connection::subscribe(std::string_view topic) {
+    if (!REDIS) {
+        size_t length = getSubscribeLength(topic);
+        unsigned char *subscribe = new unsigned char[length];
+        formatSubscribe(subscribe, topic);
 
-    if (REDIS) {
-
+        Active::Message message;
+        message.data = (char *) subscribe;
+        message.length = length;
+        message.callback = nullptr;
+        sendMessage(&message, false);
+    } else {      
         unsigned char subscribe[] = "*2\r\n$9\r\nSUBSCRIBE\r\n$9\r\neventName\r\n";
 
         Active::Message message;
@@ -469,68 +333,28 @@ void Connection::subscribe(std::string_view topic) {
         message.length = sizeof(subscribe) - 1;
         message.callback = nullptr;
         sendMessage(&message, false);
-
-    } else {
-        unsigned char payloadLength = 2 + 2 + topic.length() + 1;
-
-        unsigned char *subscribe = new unsigned char[2 + payloadLength];
-        subscribe[0] = 130;
-        subscribe[1] = payloadLength;
-
-        uint16_t packetId = 1234;
-        memcpy(subscribe + 2, &packetId, 2);
-
-        uint16_t topicLength = htons(topic.length());
-        memcpy(subscribe + 4, &topicLength, 2);
-
-        memcpy(subscribe + 6, topic.data(), topic.length());
-
-        subscribe[payloadLength + 1] = 0; // qos
-
-        Active::Message message;
-        message.data = (char *) subscribe;
-        message.length = payloadLength + 2;
-        message.callback = nullptr;
-        sendMessage(&message, false);
     }
 }
 
-void Connection::close() {
-    uS::Berkeley<uS::Epoll>::Socket::close([](uS::Berkeley<uS::Epoll>::Socket *socket) {
-        delete static_cast<Connection *>(socket);
-    });
-}
-
 void Connection::publish(std::string_view topic, std::string_view data) {
+    if (!REDIS) {
+        size_t length = getPublishLength(topic, data);
+        unsigned char *publish = new unsigned char[length];
+        formatPublish(publish, topic, data);
 
-    if (REDIS) {
+        Active::Message message;
+        message.data = (char *) publish;
+        message.length = length;
+        message.callback = nullptr;
+        sendMessage(&message, false);
+     } else {
         unsigned char publish[] = "*3\r\n$7\r\nPUBLISH\r\n$9\r\neventName\r\n$1\r\na\r\n";
 
         Active::Message message;
         message.data = (char *) publish;
         message.length = sizeof(publish) - 1;
         message.callback = nullptr;
-        sendMessage(&message, false);
-
-    } else {
-        unsigned char payloadLength = 2 + topic.length() + data.length();
-
-        unsigned char *publish = new unsigned char[2 + payloadLength];
-        publish[0] = 48;
-        publish[1] = payloadLength;
-
-        uint16_t topicLength = htons(topic.length());
-        memcpy(publish + 2, &topicLength, 2);
-
-        memcpy(publish + 4, topic.data(), topic.length());
-
-        memcpy(publish + 4 + topic.length(), data.data(), data.length());
-
-        Active::Message message;
-        message.data = (char *) publish;
-        message.length = payloadLength + 2;
-        message.callback = nullptr;
-        sendMessage(&message, false);
+        sendMessage(&message, false); 
     }
 }
 
