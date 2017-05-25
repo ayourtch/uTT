@@ -18,6 +18,9 @@ class Redis;
 class Connection : private uS::Berkeley<uS::Epoll>::Socket {
 private:
     void connect(std::string_view name);
+    int sends = 0, corked = 0;
+
+    Connection(uS::Berkeley<uS::Epoll> *context);
 
 public:
     using uS::Berkeley<uS::Epoll>::Socket::getUserData;

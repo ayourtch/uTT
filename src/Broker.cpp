@@ -132,13 +132,6 @@ struct Active : uS::Berkeley<uS::Epoll>::Socket {
         }
     }
 
-    Active(uS::Berkeley<uS::Epoll> *context) : uS::Berkeley<uS::Epoll>::Socket(context) {
-        setDerivative(ACTIVE);
-
-        bool *valid = new bool(true);
-        setUserData(valid);
-    }
-
     static void onData(uS::Berkeley<uS::Epoll>::Socket *socket, char *data, size_t length) {
 
         for (char *cursor = data; cursor < data + length; ) {
@@ -160,9 +153,17 @@ struct Active : uS::Berkeley<uS::Epoll>::Socket {
     }
 
     static uS::Berkeley<uS::Epoll>::Socket *allocator(uS::Berkeley<uS::Epoll> *context) {
-        return new Active(context);
+        return new Connection(context);//Active(context);
     }
 };
+
+// Merge this with Active!
+Connection::Connection(uS::Berkeley<uS::Epoll> *context) : uS::Berkeley<uS::Epoll>::Socket(context) {
+    setDerivative(ACTIVE);
+
+    bool *valid = new bool(true);
+    setUserData(valid);
+}
 
 struct Passive {
     static void onData(uS::Berkeley<uS::Epoll>::Socket *socket, char *data, size_t length) {
@@ -236,7 +237,24 @@ Node::Node() : loop(true), uS::Berkeley<uS::Epoll>(&loop) {
             messagePtr->length = length;
             messagePtr->callback = nullptr;
         }, [](void *user, void *connection) {
+            // info
+            if (static_cast<Connection *>(connection)->corked) {
+                std::cout << "Sending corked" << std::endl;
+            }
+
             static_cast<Connection *>(connection)->sendMessage(static_cast<Active::Message *>(user), false);
+
+            if (static_cast<Connection *>(connection)->corked && static_cast<Connection *>(connection)->sends == 1) {
+                std::cout << "Uncorking" << std::endl;
+                static_cast<Connection *>(connection)->corked = false;
+            }
+
+            static_cast<Connection *>(connection)->sends--;
+        }, [](void *connection) {
+            if (++static_cast<Connection *>(connection)->sends == 2) {
+                std::cout << "Corking" << std::endl;
+                static_cast<Connection *>(connection)->corked = true;
+            }
         }, &message);
     };
 }

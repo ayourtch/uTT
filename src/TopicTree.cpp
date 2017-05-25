@@ -59,8 +59,19 @@ void TopicTree::reset() {
     root = new Node;
 }
 
-void TopicTree::drain(void (*prepareCb)(void *, char *, size_t), void (*sendCb)(void *, void *), void *user) {
+void TopicTree::drain(void (*prepareCb)(void *, char *, size_t), void (*sendCb)(void *, void *), void (*refCb)(void *), void *user) {
     if (pubNodes.size()) {
+
+        //if(pubNodes.size() > 1) {
+            for (Node *topicNode : pubNodes) {
+                for (std::pair<void *, bool *> p : topicNode->subscribers) {
+                    if (*p.second) {
+                        refCb(p.first);
+                    }
+                }
+            }
+        //}
+
         for (Node *topicNode : pubNodes) {
             prepareCb(user, (char *) topicNode->sharedMessage.data(), topicNode->sharedMessage.length());
             for (auto it = topicNode->subscribers.begin(); it != topicNode->subscribers.end(); ) {

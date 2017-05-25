@@ -21,7 +21,7 @@ public:
     void subscribe(std::string topic, void *connection, bool *valid);
     void publish(std::string topic, char *data, size_t length);
     void reset();
-    void drain(void (*prepareCb)(void *user, char *, size_t), void (*sendCb)(void *, void *), void *user);
+    void drain(void (*prepareCb)(void *user, char *, size_t), void (*sendCb)(void *, void *), void (*refCb)(void *), void *user);
 };
 
 #endif // TOPICTREE_H
